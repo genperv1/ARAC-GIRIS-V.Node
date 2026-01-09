@@ -5764,6 +5764,9 @@ Bu işlem geri alınamaz!`);
         loginButton.addEventListener('click', login);
     }
 
+    // Update issue indicators from server on load
+    try { updateIssuesIndicators(); } catch(e){}
+
     if (loginIdInput) {
         loginIdInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') login();
@@ -6110,13 +6113,22 @@ function clearAllIssues(){
 
 
 function issueCardClass(plate){
-  // 1 tane bile sorun varsa kart kırmızı olsun (kalıcı; kullanıcı manuel siler)
+  // Prefer server-provided cached counts when available, fallback to localStorage
+  try {
+    if (window.__problemsCountMap && typeof plate === 'string') {
+      const key = _normPlate(plate);
+      const scnt = Number(window.__problemsCountMap[key] || 0);
+      if (scnt > 0) return 'border-2 border-red-500 bg-red-50';
+    }
+  } catch(e){}
   const cnt = getIssueCount(plate);
   return cnt > 0 ? 'border-2 border-red-500 bg-red-50' : '';
 }
 function issuesBadgeHTML(plate){
   const cnt = getIssueCount(plate);
   const p = _normPlate(plate);
+  // Prefer server cache if available
+  try { if (window.__problemsCountMap && window.__problemsCountMap[_normPlate(plate)] !== undefined) { return window.__problemsCountMap[_normPlate(plate)] > 0 ? `<button class="issues-open ml-2 text-xs px-2 py-1 rounded-full bg-red-600 text-white font-bold" data-plate="${p}" title="Sorun kayıtlarını gör">SORUN ${window.__problemsCountMap[_normPlate(plate)]}</button>` : `<button class="issues-open ml-2 text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-700 font-semibold" data-plate="${p}" title="Sorun ekle / gör">SORUN 0</button>` } } catch(e){}
   if (!p) return '';
   if (cnt > 0) {
     return `<button class="issues-open ml-2 text-xs px-2 py-1 rounded-full bg-red-600 text-white font-bold" data-plate="${p}" title="Sorun kayıtlarını gör">SORUN ${cnt}</button>`;
@@ -6130,17 +6142,86 @@ function issuesStatusHTML(plate){
   return `<span style="color:#16a34a;font-weight:800">✅ Sorun yok</span>`;
 }
 
-function updateIssuesIndicators(){
-  // Kartlardaki butonları ve sayıları güncellemek için yeniden render zaten yapıyor.
-  // Ama formda plaka yazarken sadece takip butonunu/yerel göstergeleri güncelleyelim.
+async function updateIssuesIndicators(plate){
+  // Update issue counts on UI. Prefer server counts, fall back to localStorage.
   try {
-    const plate = document.getElementById('cekiciPlaka')?.value || '';
-    const cnt = getIssueCount(plate);
-    const btn = document.getElementById('issuesQuickBtn');
-    if (btn) {
-      btn.textContent = `⚠️ Şoför Sorunları (${cnt})`;
-      btn.style.background = cnt>0 ? '#ef4444' : '#374151';
+    const norm = _normPlate(plate || document.getElementById('cekiciPlaka')?.value || '');
+    const setBtnForPlate = (p, cnt) => {
+      // update quick btn if matching
+      try {
+        const qb = document.getElementById('issuesQuickBtn');
+        if (qb && String(p || '') === _normPlate(document.getElementById('cekiciPlaka')?.value || '')) {
+          qb.textContent = `⚠️ Şoför Sorunları (${cnt})`;
+          qb.style.background = cnt>0 ? '#ef4444' : '#374151';
+        }
+      } catch(e){}
+      // update any .issues-open buttons with matching data-plate
+      try {
+        Array.from(document.querySelectorAll('.issues-open')).forEach(el => {
+          const dp = el.getAttribute('data-plate') || '';
+          if (_normPlate(dp) === _normPlate(p || '')) {
+            const text = cnt>0 ? `SORUN ${cnt}` : `SORUN 0`;
+            el.innerHTML = text;
+            el.style.background = cnt>0 ? '#ef4444' : '';
+          }
+        });
+      } catch(e){}
+    };
+
+    if (norm) {
+      try {
+        const res = await fetch('/api/problems?plate=' + encodeURIComponent(norm));
+        if (res.ok) {
+          const arr = await res.json();
+          const cnt = Array.isArray(arr) ? arr.filter(it => { const s = (it && it.data && it.data.status) || it.status; return s !== 'closed'; }).length : 0;
+            window.__problemsCountMap = window.__problemsCountMap || {};
+            window.__problemsCountMap[norm] = cnt;
+            setBtnForPlate(norm, cnt);
+          return;
+        }
+      } catch(e){}
+      // fallback to local
+      const cntLocal = getIssueCount(norm);
+      setBtnForPlate(norm, cntLocal);
+      return;
     }
+
+    // no specific plate: update quick button and all issue-open buttons
+    try {
+      const qbPlate = _normPlate(document.getElementById('cekiciPlaka')?.value || '');
+      if (qbPlate) {
+        const res0 = await fetch('/api/problems?plate=' + encodeURIComponent(qbPlate));
+        if (res0.ok) {
+          const arr0 = await res0.json();
+          const cnt0 = Array.isArray(arr0) ? arr0.filter(it => { const s = (it && it.data && it.data.status) || it.status; return s !== 'closed'; }).length : 0;
+          window.__problemsCountMap = window.__problemsCountMap || {};
+          window.__problemsCountMap[qbPlate] = cnt0;
+          setBtnForPlate(qbPlate, cnt0);
+        }
+      }
+    } catch(e){}
+
+    // update all buttons by querying server once for all problems and grouping (if server reachable)
+    try {
+      const res = await fetch('/api/problems');
+      if (res.ok) {
+        const all = await res.json();
+        const grouped = {};
+        (all || []).forEach(it => { const p = _normPlate(it.plate || it.addedPlate || ''); if (!p) return; if (!grouped[p]) grouped[p]=0; const s = (it && it.data && it.data.status) || it.status; if (s !== 'closed') grouped[p]++; });
+        window.__problemsCountMap = grouped;
+        Object.keys(grouped).forEach(p => setBtnForPlate(p, grouped[p]));
+        return;
+      }
+    } catch(e){}
+
+    // final fallback: update using localStorage map
+    try {
+      const map = loadIssuesMap();
+      const localMap = {};
+      Object.keys(map || {}).forEach(k => { const cnt = Array.isArray(map[k]) ? map[k].filter(it => (it && it.status) !== 'closed').length : 0; localMap[k] = cnt; setBtnForPlate(k, cnt); });
+      window.__problemsCountMap = window.__problemsCountMap || {};
+      Object.assign(window.__problemsCountMap, localMap);
+    } catch(e){}
   } catch(e){}
 }
 
@@ -6484,6 +6565,7 @@ function openIssuesModal(plateOrEmpty){
               await apiUpdateProblem(id, p, patch);
               renderList('');
               try { render(); } catch(e){}
+              try { await updateIssuesIndicators(p); } catch(e){}
               return;
             } catch(e) {
             }
@@ -6511,6 +6593,7 @@ function openIssuesModal(plateOrEmpty){
             await apiDeleteProblem(id, p);
             renderList('');
             try { render(); } catch(e){}
+            try { await updateIssuesIndicators(p); } catch(e){}
             return;
           }
           const i = Number(btn.dataset.idx);
@@ -6536,6 +6619,7 @@ function openIssuesModal(plateOrEmpty){
               await apiUpdateProblem(id, p, cur);
               renderList(p);
               try { render(); } catch(e){}
+              try { await updateIssuesIndicators(p); } catch(e){}
               return;
             } catch(e) {}
           }
@@ -6642,6 +6726,7 @@ function openIssuesModal(plateOrEmpty){
           await apiUpdateProblem(id, p, cur);
           renderList(p);
           try { render(); } catch(e){}
+          try { await updateIssuesIndicators(p); } catch(e){}
           return;
         } catch(e) {}
       });
@@ -6669,6 +6754,7 @@ function openIssuesModal(plateOrEmpty){
         }
         doRefresh();
         try { render(); } catch(e){}
+        try { await updateIssuesIndicators(p); } catch(e){}
       })();
     });
   }
@@ -6717,6 +6803,7 @@ function openIssuesModal(plateOrEmpty){
     msgEl.textContent = '✅ Kaydedildi.';
     doRefresh();
     try { render(); } catch(e){}
+    try { await updateIssuesIndicators(plate); } catch(e){}
   });
 
   // initial list
