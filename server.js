@@ -38,6 +38,12 @@ function prepareSchema(){
       data TEXT,
       ts INTEGER
     )`);
+    db.run(`CREATE TABLE IF NOT EXISTS problems(
+      id TEXT PRIMARY KEY,
+      plate TEXT,
+      data TEXT,
+      ts INTEGER
+    )`);
     db.run(`CREATE TABLE IF NOT EXISTS kv_store(
       key TEXT PRIMARY KEY,
       value TEXT
@@ -225,6 +231,85 @@ api.post('/reports', (req, res) => {
 api.delete('/reports', (req, res) => {
   db.run('DELETE FROM report', (err) => {
     if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true });
+  });
+});
+
+// Problems (driver/plate issues) - store each issue as a row in problems
+api.get('/problems', (req, res) => {
+  const plateQuery = req.query.plate || '';
+  if (plateQuery) {
+    const plate = String(plateQuery || '');
+    db.all('SELECT id, data FROM problems WHERE plate = ? ORDER BY ts DESC', [plate], (err, rows) => {
+      if (err) { console.error('GET /problems?plate SQL error', err); return res.status(500).json({ error: err.message }); }
+      const parsed = (rows || []).map(r => { try { return Object.assign({ id: r.id }, JSON.parse(r.data)); } catch(e){ return { id: r.id, raw: r.data }; } });
+      res.json(parsed);
+    });
+    return;
+  }
+  db.all('SELECT id, data, plate FROM problems ORDER BY ts DESC', (err, rows) => {
+    if (err) { console.error('GET /problems SQL error', err); return res.status(500).json({ error: err.message }); }
+    const parsed = (rows || []).map(r => { try { return Object.assign({ id: r.id, plate: r.plate }, JSON.parse(r.data)); } catch(e){ return { id: r.id, plate: r.plate, raw: r.data }; } });
+    res.json(parsed);
+  });
+});
+
+api.get('/problems/:id', (req, res) => {
+  const id = req.params.id;
+  db.get('SELECT data FROM problems WHERE id = ?', [id], (err, row) => {
+    if (err) { console.error('GET /problems/:id SQL error', err); return res.status(500).json({ error: err.message }); }
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    try { return res.json(JSON.parse(row.data)); } catch(e){ return res.json({ raw: row.data }); }
+  });
+});
+
+api.post('/problems', (req, res) => {
+  const body = req.body || {};
+  const id = String(body.id || (Date.now().toString() + Math.random().toString(16).slice(2)));
+  const plate = String(body.plate || '');
+  const data = body.data !== undefined ? body.data : body;
+  const raw = (typeof data === 'string') ? data : JSON.stringify(data);
+  const ts = Number(body.ts || Date.now());
+  db.run('INSERT OR REPLACE INTO problems(id, plate, data, ts) VALUES(?,?,?,?)', [id, plate, raw, ts], (err) => {
+    if (err) { console.error('POST /problems SQL error', err); return res.status(500).json({ error: err.message }); }
+    res.json({ ok: true, id });
+  });
+});
+
+api.put('/problems/:id', (req, res) => {
+  const id = req.params.id;
+  const body = req.body || {};
+  const plate = String(body.plate || '');
+  const data = body.data !== undefined ? body.data : body;
+  const raw = (typeof data === 'string') ? data : JSON.stringify(data);
+  const ts = Number(body.ts || Date.now());
+  db.run('INSERT OR REPLACE INTO problems(id, plate, data, ts) VALUES(?,?,?,?)', [id, plate, raw, ts], (err) => {
+    if (err) { console.error('PUT /problems/:id SQL error', err); return res.status(500).json({ error: err.message }); }
+    res.json({ ok: true, id });
+  });
+});
+
+api.delete('/problems/:id', (req, res) => {
+  const id = req.params.id;
+  db.run('DELETE FROM problems WHERE id = ?', [id], (err) => {
+    if (err) { console.error('DELETE /problems/:id SQL error', err); return res.status(500).json({ error: err.message }); }
+    res.json({ ok: true });
+  });
+});
+
+// delete all problems for a plate
+api.delete('/problems/plate/:plate', (req, res) => {
+  const plate = String(req.params.plate || '');
+  db.run('DELETE FROM problems WHERE plate = ?', [plate], (err) => {
+    if (err) { console.error('DELETE /problems/plate/:plate SQL error', err); return res.status(500).json({ error: err.message }); }
+    res.json({ ok: true });
+  });
+});
+
+// delete all problems
+api.delete('/problems', (req, res) => {
+  db.run('DELETE FROM problems', (err) => {
+    if (err) { console.error('DELETE /problems SQL error', err); return res.status(500).json({ error: err.message }); }
     res.json({ ok: true });
   });
 });

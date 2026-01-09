@@ -6231,7 +6231,7 @@ function openIssuesModal(plateOrEmpty){
             <option value="Sıra / Yoğunluk İhlali">Sıra / Yoğunluk İhlali</option>
             <option value="Diğer">Diğer</option>
           </select>
-          <div style="margin-top:6px;font-size:11px;opacity:.75;">Not: Tip seçilince açıklama otomatik gelir (dilersen düzenle).</div>
+          
         </div>
         <div>
           <div style="font-size:12px;opacity:.85;margin-bottom:6px;">Olay Notu</div>
@@ -6333,42 +6333,101 @@ function openIssuesModal(plateOrEmpty){
     });
   }
 
-  const renderList = (plate) => {
+  const renderList = async (plate) => {
     const listEl = document.getElementById('issuesList');
     if (!listEl) return;
 
     const norm = _normPlate(plate);
     const showClosed = !!document.getElementById('issuesShowClosed')?.checked;
 
-    // 🔎 Plaka boşsa: tüm sorunlu plakaları listele
-    if (!norm) {
-      const map = loadIssuesMap();
-      const keys = Object.keys(map || {}).filter(k => Array.isArray(map[k]) && map[k].length > 0);
+    // fetch helpers and API-backed rendering
+    const apiFetchProblems = async (p) => {
+      try {
+        const q = p ? ('?plate=' + encodeURIComponent(_normPlate(p))) : '';
+        const res = await fetch('/api/problems' + q);
+        if (!res.ok) throw new Error('network');
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+      } catch (e) {
+        if (!p) {
+          const map = loadIssuesMap();
+          const keys = Object.keys(map || {}).filter(k => Array.isArray(map[k]) && map[k].length > 0);
+          const all = [];
+          keys.forEach(k => { (map[k]||[]).forEach(it => all.push(Object.assign({}, it, { plate: k }))); });
+          return all;
+        }
+        return getIssues(p).map(it => Object.assign({}, it, { plate: _normPlate(p) }));
+      }
+    };
 
-      if (keys.length === 0) {
+    const apiAddProblem = async (p, issue) => {
+      try {
+        const payload = { plate: _normPlate(p), data: issue, ts: Date.now() };
+        const res = await fetch('/api/problems', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error('network');
+        return (await res.json()).id;
+      } catch (e) {
+        addIssue(p, issue);
+        return null;
+      }
+    };
+
+    const apiUpdateProblem = async (id, p, issue) => {
+      try {
+        const payload = { plate: _normPlate(p), data: issue, ts: Date.now() };
+        const res = await fetch('/api/problems/' + encodeURIComponent(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error('network');
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+
+    const apiDeleteProblem = async (id, p, idxFallback) => {
+      try {
+        if (id) {
+          const res = await fetch('/api/problems/' + encodeURIComponent(id), { method: 'DELETE' });
+          if (!res.ok) throw new Error('network');
+          return true;
+        }
+      } catch (e) {
+        if (p !== undefined && idxFallback !== undefined) {
+          deleteIssue(p, idxFallback);
+          return true;
+        }
+      }
+      return false;
+    };
+
+    if (!norm) {
+      const all = await apiFetchProblems('');
+      if (!Array.isArray(all) || all.length === 0) {
         listEl.innerHTML = `<div style="opacity:.8">✅ Kayıtlı sorun bulunamadı.</div>`;
         return;
       }
-
-      // En çok sorunu olan en üste
-      keys.sort((a,b) => (map[b].length||0) - (map[a].length||0));
-
+      const grouped = {};
+      all.forEach(it => {
+        const p = _normPlate(it.plate || it.addedPlate || '');
+        if (!p) return;
+        if (!Array.isArray(grouped[p])) grouped[p] = [];
+        grouped[p].push(it);
+      });
+      const keys = Object.keys(grouped).sort((a,b) => (grouped[b].length||0)-(grouped[a].length||0));
       listEl.innerHTML = keys.map(k => {
-        let items = Array.isArray(map[k]) ? map[k] : [];
-        if (!showClosed) items = items.filter(it => (it && it.status) !== 'closed');
+        const items = (grouped[k] || []).filter(it => showClosed ? true : ((it && it.status) !== 'closed'));
         const headPlate = (k || '').toUpperCase();
-        const inner = items.map((it, idx) => {
-          const dt = it.dateLocal || it.dateISO || '';
-          const type = (it.type || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          const note = (it.note || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          const addedBy = (it.addedBy || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          const isClosed = (it.status === 'closed');
-          const hasPhoto = !!it.photo;
-
+        const inner = items.map(it => {
+          const dt = it.dateLocal || (it.data && it.data.dateLocal) || it.dateISO || (it.data && it.data.dateISO) || '';
+          const dataObj = it.data && typeof it.data === 'object' ? it.data : (typeof it === 'object' ? it : {});
+          const type = (dataObj.type || it.type || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          const note = (dataObj.note || it.note || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          const addedBy = (dataObj.addedBy || it.addedBy || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          const isClosed = (dataObj.status === 'closed' || it.status === 'closed');
+          const hasPhoto = !!(dataObj.photo || it.photo);
+          const id = it.id || '';
           const statusBadge = isClosed
             ? `<span style="background:#16a34a;color:#fff;font-weight:900;font-size:11px;padding:3px 8px;border-radius:999px;">KAPATILDI</span>`
             : `<span style="background:#ef4444;color:#fff;font-weight:900;font-size:11px;padding:3px 8px;border-radius:999px;">AÇIK</span>`;
-
           return `
             <div style="border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px;margin-top:10px;background:${isClosed ? '#0b1d12' : '#0f172a'};opacity:${isClosed ? '.85' : '1'};">
               <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
@@ -6380,20 +6439,17 @@ function openIssuesModal(plateOrEmpty){
                   </div>
                   ${addedBy ? `<div style="margin-top:6px;font-size:12px;opacity:.9;">👤 Ekleyen: <b>${addedBy}</b></div>` : ``}
                   <div style="margin-top:6px;white-space:pre-wrap;">${note}</div>
-                  ${isClosed ? `<div style="margin-top:6px;font-size:12px;opacity:.85;">✅ Kapanış: ${(it.closedAtLocal || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;')}${it.closedBy ? ` • 👤 ${String(it.closedBy).replace(/</g,'&lt;').replace(/>/g,'&gt;')}` : ''}</div>` : ``}
                 </div>
                 <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
-                  <button class="issueEditBtn" data-plate="${k}" data-idx="${idx}" style="background:#374151;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Düzenle</button>
-                  <button class="issueToggleBtn" data-plate="${k}" data-idx="${idx}" style="background:${isClosed ? '#0ea5e9' : '#16a34a'};color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">${isClosed ? 'Aç' : 'Kapat'}</button>
-                  <button class="issueDelBtn" data-plate="${k}" data-idx="${idx}" style="background:#ef4444;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Sil</button>
+                  <button class="issueEditBtn" data-plate="${k}" data-id="${id}" style="background:#374151;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Düzenle</button>
+                  <button class="issueToggleBtn" data-plate="${k}" data-id="${id}" style="background:${isClosed ? '#0ea5e9' : '#16a34a'};color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">${isClosed ? 'Aç' : 'Kapat'}</button>
+                  <button class="issueDelBtn" data-plate="${k}" data-id="${id}" style="background:#ef4444;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Sil</button>
                 </div>
               </div>
-              ${hasPhoto ? `<div style="margin-top:10px;"><img src="${it.photo}" style="max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,.12)"></div>` : ``}
+              ${hasPhoto ? `<div style="margin-top:10px;"><img src="${dataObj.photo || it.photo}" style="max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,.12)"></div>` : ``}
             </div>
           `;
-
         }).join('');
-
         return `
           <div style="border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px;margin-bottom:12px;background:#111827;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
@@ -6404,91 +6460,116 @@ function openIssuesModal(plateOrEmpty){
           </div>
         `;
       }).join('');
-
-      // bind edit/delete (tüm plakalar)
       Array.from(card.querySelectorAll('.issueEditBtn')).forEach(btn=>{
         btn.addEventListener('click', async ()=>{
+          const id = btn.dataset.id || '';
           const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
+          if (id) {
+            try {
+              const res = await fetch('/api/problems/' + encodeURIComponent(id));
+              if (!res.ok) throw new Error('no');
+              const cur = await res.json();
+              const curData = (cur && cur.data) ? (typeof cur.data === 'object' ? cur.data : JSON.parse(cur.data)) : cur;
+              const newType = prompt('Sorun Tipi:', curData.type || '');
+              const newNote = prompt('Olay Notu:', curData.note || '');
+              if (newNote == null) return;
+              const newDate = prompt('Tarih/Saat (örn: 26.12.2025 14:30):', curData.dateLocal || '');
+              const patch = Object.assign({}, curData, {
+                type: String(newType || '').trim(),
+                note: String(newNote || '').trim(),
+                dateLocal: newDate ? String(newDate).trim() : (curData.dateLocal || ''),
+                dateISO: ( ()=>{ if (!newDate) return curData.dateISO || ''; const tryD = new Date(newDate); if (!isNaN(tryD.getTime())) return tryD.toISOString(); return curData.dateISO || ''; })()
+              });
+              if (!patch.note) { alert('❗ Sorun notu boş olamaz.'); return; }
+              await apiUpdateProblem(id, p, patch);
+              renderList('');
+              try { render(); } catch(e){}
+              return;
+            } catch(e) {
+            }
+          }
+          const pi = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
           const i = Number(btn.dataset.idx);
-          const itemsNow = getIssues(p);
+          const itemsNow = getIssues(pi);
           const cur = itemsNow[i] || {};
           const newType = prompt('Sorun Tipi:', cur.type || '');
           const newNote = prompt('Olay Notu:', cur.note || '');
           if (newNote == null) return;
           const newDate = prompt('Tarih/Saat (örn: 26.12.2025 14:30):', cur.dateLocal || '');
-          const patch = {
-            type: String(newType || '').trim(),
-            note: String(newNote || '').trim(),
-            dateLocal: newDate ? String(newDate).trim() : (cur.dateLocal || ''),
-            dateISO: (()=>{
-              if (!newDate) return cur.dateISO || '';
-              const tryD = new Date(newDate);
-              if (!isNaN(tryD.getTime())) return tryD.toISOString();
-              return cur.dateISO || '';
-            })()
-          };
+          const patch = { type: String(newType || '').trim(), note: String(newNote || '').trim(), dateLocal: newDate ? String(newDate).trim() : (cur.dateLocal || ''), dateISO: ( ()=>{ if (!newDate) return cur.dateISO || ''; const tryD = new Date(newDate); if (!isNaN(tryD.getTime())) return tryD.toISOString(); return cur.dateISO || ''; })() };
           if (!patch.note) { alert('❗ Sorun notu boş olamaz.'); return; }
-          updateIssue(p, i, patch);
-          renderList(''); // tüm listeyi yenile
+          updateIssue(pi, i, patch);
+          renderList('');
           try { render(); } catch(e){}
         });
       });
-
       Array.from(card.querySelectorAll('.issueDelBtn')).forEach(btn=>{
         btn.addEventListener('click', async ()=>{
+          const id = btn.dataset.id || '';
           const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
+          if (id) {
+            await apiDeleteProblem(id, p);
+            renderList('');
+            try { render(); } catch(e){}
+            return;
+          }
           const i = Number(btn.dataset.idx);
           deleteIssue(p, i);
           renderList('');
           try { render(); } catch(e){}
         });
       });
-
-      // ✅ Kapat / Aç
       Array.from(card.querySelectorAll('.issueToggleBtn')).forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const p = btn.dataset.plate || '';
+        btn.addEventListener('click', async ()=>{
+          const id = btn.dataset.id || '';
+          const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
+          if (id) {
+            try {
+              const res = await fetch('/api/problems/' + encodeURIComponent(id));
+              if (!res.ok) throw new Error('no');
+              const curRaw = await res.json();
+              const cur = (curRaw && curRaw.data) ? (typeof curRaw.data === 'object' ? curRaw.data : JSON.parse(curRaw.data)) : curRaw;
+              const isClosed = (cur.status === 'closed');
+              const actor = (document.getElementById('imzaKantarAd')?.value || '').trim();
+              if (isClosed) { cur.status='open'; cur.closedAtISO=''; cur.closedAtLocal=''; cur.closedBy=''; }
+              else { const d=new Date(); cur.status='closed'; cur.closedAtISO=d.toISOString(); cur.closedAtLocal=d.toLocaleString('tr-TR'); cur.closedBy=actor; }
+              await apiUpdateProblem(id, p, cur);
+              renderList(p);
+              try { render(); } catch(e){}
+              return;
+            } catch(e) {}
+          }
           const i = Number(btn.dataset.idx);
           const itemsNow = getIssues(p);
-          const cur = itemsNow[i] || {};
-          const isClosed = (cur.status === 'closed');
-          const actor = (document.getElementById('imzaKantarAd')?.value || '').trim();
-          if (isClosed) {
+          const cur2 = itemsNow[i] || {};
+          const isClosed2 = (cur2.status === 'closed');
+          const actor2 = (document.getElementById('imzaKantarAd')?.value || '').trim();
+          if (isClosed2) {
             updateIssue(p, i, { status:'open', closedAtISO:'', closedAtLocal:'', closedBy:'' });
           } else {
             const d = new Date();
-            updateIssue(p, i, { status:'closed', closedAtISO:d.toISOString(), closedAtLocal:d.toLocaleString('tr-TR'), closedBy: actor });
+            updateIssue(p, i, { status:'closed', closedAtISO:d.toISOString(), closedAtLocal:d.toLocaleString('tr-TR'), closedBy: actor2 });
           }
-          renderList('');
+          renderList(p);
           try { render(); } catch(e){}
         });
       });
-
       return;
     }
-
-    // 🔎 Plaka doluysa: sadece o plakayı listele
-    let items = getIssues(norm);
-    if (!showClosed) items = items.filter(it => (it && it.status) !== 'closed');
-    const cnt = items.length;
-
-    if (cnt === 0) {
-      listEl.innerHTML = `<div style="opacity:.8">✅ Bu plakaya kayıtlı sorun yok.</div>`;
-      return;
-    }
-
-    listEl.innerHTML = items.map((it, idx) => {
-      const dt = it.dateLocal || it.dateISO || '';
-      const type = (it.type || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      const note = (it.note || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      const addedBy = (it.addedBy || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      const isClosed = (it.status === 'closed');
-      const hasPhoto = !!it.photo;
-
+    const items = (await apiFetchProblems(norm)).filter(it => showClosed ? true : ((it && ((it.data && it.data.status) || it.status)) !== 'closed'));
+    if (!items || items.length === 0) { listEl.innerHTML = `<div style="opacity:.8">✅ Bu plakaya kayıtlı sorun yok.</div>`; return; }
+    listEl.innerHTML = items.map((it) => {
+      const dataObj = it.data && typeof it.data === 'object' ? it.data : (typeof it.data === 'string' ? JSON.parse(it.data || '{}') : it);
+      const dt = dataObj.dateLocal || dataObj.dateISO || it.dateISO || '';
+      const type = (dataObj.type || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const note = (dataObj.note || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const addedBy = (dataObj.addedBy || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const isClosed = (dataObj.status === 'closed' || it.status === 'closed');
+      const hasPhoto = !!(dataObj.photo || it.photo);
+      const id = it.id || '';
       const statusBadge = isClosed
         ? `<span style="background:#16a34a;color:#fff;font-weight:900;font-size:11px;padding:3px 8px;border-radius:999px;">KAPATILDI</span>`
         : `<span style="background:#ef4444;color:#fff;font-weight:900;font-size:11px;padding:3px 8px;border-radius:999px;">AÇIK</span>`;
-
       return `
         <div style="border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px;margin-bottom:10px;background:${isClosed ? '#0b1d12' : '#0f172a'};opacity:${isClosed ? '.85' : '1'};">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
@@ -6500,78 +6581,69 @@ function openIssuesModal(plateOrEmpty){
               </div>
               ${addedBy ? `<div style="margin-top:6px;font-size:12px;opacity:.9;">👤 Ekleyen: <b>${addedBy}</b></div>` : ``}
               <div style="margin-top:6px;white-space:pre-wrap;">${note}</div>
-              ${isClosed ? `<div style="margin-top:6px;font-size:12px;opacity:.85;">✅ Kapanış: ${(it.closedAtLocal || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;')}${it.closedBy ? ` • 👤 ${String(it.closedBy).replace(/</g,'&lt;').replace(/>/g,'&gt;')}` : ''}</div>` : ``}
+              ${isClosed ? `<div style="margin-top:6px;font-size:12px;opacity:.85;">✅ Kapanış: ${(dataObj.closedAtLocal || '').toString().replace(/</g,'&lt;').replace(/>/g,'&gt;')}${dataObj.closedBy ? ` • 👤 ${String(dataObj.closedBy).replace(/</g,'&lt;').replace(/>/g,'&gt;')}` : ''}</div>` : ``}
             </div>
             <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
-              <button class="issueEditBtn" data-plate="${norm}" data-idx="${idx}" style="background:#374151;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Düzenle</button>
-              <button class="issueToggleBtn" data-plate="${norm}" data-idx="${idx}" style="background:${isClosed ? '#0ea5e9' : '#16a34a'};color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">${isClosed ? 'Aç' : 'Kapat'}</button>
-              <button class="issueDelBtn" data-plate="${norm}" data-idx="${idx}" style="background:#ef4444;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Sil</button>
+              <button class="issueEditBtn" data-plate="${norm}" data-id="${id}" style="background:#374151;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Düzenle</button>
+              <button class="issueToggleBtn" data-plate="${norm}" data-id="${id}" style="background:${isClosed ? '#0ea5e9' : '#16a34a'};color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">${isClosed ? 'Aç' : 'Kapat'}</button>
+              <button class="issueDelBtn" data-plate="${norm}" data-id="${id}" style="background:#ef4444;color:#fff;border:none;padding:8px 10px;border-radius:10px;cursor:pointer;">Sil</button>
             </div>
           </div>
-          ${hasPhoto ? `<div style="margin-top:10px;"><img src="${it.photo}" style="max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,.12)"></div>` : ``}
+          ${hasPhoto ? `<div style="margin-top:10px;"><img src="${dataObj.photo || it.photo}" style="max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,.12)"></div>` : ``}
         </div>
       `;
-
     }).join('');
-
-    // edit binds
     Array.from(card.querySelectorAll('.issueEditBtn')).forEach(btn=>{
       btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.id || '';
         const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
-        const i = Number(btn.dataset.idx);
-        const itemsNow = getIssues(p);
-        const cur = itemsNow[i] || {};
-        const newType = prompt('Sorun Tipi:', cur.type || '');
-          const newNote = prompt('Olay Notu:', cur.note || '');
-        if (newNote == null) return;
-        const newDate = prompt('Tarih/Saat (örn: 26.12.2025 14:30):', cur.dateLocal || '');
-        const patch = {
-        type: String(newType || '').trim(),
-        note: String(newNote || '').trim(),
-          dateLocal: newDate ? String(newDate).trim() : (cur.dateLocal || ''),
-          // dateISO'yu newDate parse edebilirse güncelle
-          dateISO: (()=>{
-            if (!newDate) return cur.dateISO || '';
-            const tryD = new Date(newDate);
-            if (!isNaN(tryD.getTime())) return tryD.toISOString();
-            return cur.dateISO || '';
-          })()
-        };
-        if (!patch.note) { alert('❗ Sorun notu boş olamaz.'); return; }
-        updateIssue(p, i, patch);
-        renderList(p);
-        try { render(); } catch(e){}
+        if (!id) { return; }
+        try {
+          const res = await fetch('/api/problems/' + encodeURIComponent(id));
+          if (!res.ok) throw new Error('no');
+          const cur = await res.json();
+          const curData = (cur && cur.data) ? (typeof cur.data === 'object' ? cur.data : JSON.parse(cur.data)) : cur;
+          const newType = prompt('Sorun Tipi:', curData.type || '');
+          const newNote = prompt('Olay Notu:', curData.note || '');
+          if (newNote == null) return;
+          const newDate = prompt('Tarih/Saat (örn: 26.12.2025 14:30):', curData.dateLocal || '');
+          const patch = Object.assign({}, curData, { type: String(newType || '').trim(), note: String(newNote || '').trim(), dateLocal: newDate ? String(newDate).trim() : (curData.dateLocal || ''), dateISO: ( ()=>{ if (!newDate) return curData.dateISO || ''; const tryD = new Date(newDate); if (!isNaN(tryD.getTime())) return tryD.toISOString(); return curData.dateISO || ''; })() });
+          if (!patch.note) { alert('❗ Sorun notu boş olamaz.'); return; }
+          await apiUpdateProblem(id, p, patch);
+          renderList(p);
+          try { render(); } catch(e){}
+        } catch(e) {}
       });
     });
-
-    // delete binds
     Array.from(card.querySelectorAll('.issueDelBtn')).forEach(btn=>{
       btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.id || '';
         const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
-        const i = Number(btn.dataset.idx);
-        deleteIssue(p, i);
+        if (!id) return;
+        await apiDeleteProblem(id, p);
         renderList(p);
         try { render(); } catch(e){}
       });
     });
-
-    // ✅ Kapat / Aç
     Array.from(card.querySelectorAll('.issueToggleBtn')).forEach(btn=>{
-      btn.addEventListener('click', ()=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.id || '';
         const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
-        const i = Number(btn.dataset.idx);
-        const itemsNow = getIssues(p);
-        const cur = itemsNow[i] || {};
-        const isClosed = (cur.status === 'closed');
-        const actor = (document.getElementById('imzaKantarAd')?.value || '').trim();
-        if (isClosed) {
-          updateIssue(p, i, { status:'open', closedAtISO:'', closedAtLocal:'', closedBy:'' });
-        } else {
-          const d = new Date();
-          updateIssue(p, i, { status:'closed', closedAtISO:d.toISOString(), closedAtLocal:d.toLocaleString('tr-TR'), closedBy: actor });
-        }
-        renderList(p);
-        try { render(); } catch(e){}
+        if (!id) return;
+        try {
+          const res = await fetch('/api/problems/' + encodeURIComponent(id));
+          if (!res.ok) throw new Error('no');
+          const curRaw = await res.json();
+          const cur = (curRaw && curRaw.data) ? (typeof curRaw.data === 'object' ? curRaw.data : JSON.parse(curRaw.data)) : curRaw;
+          const isClosed = (cur.status === 'closed');
+          const actor = (document.getElementById('imzaKantarAd')?.value || '').trim();
+          if (isClosed) { cur.status='open'; cur.closedAtISO=''; cur.closedAtLocal=''; cur.closedBy=''; }
+          else { const d=new Date(); cur.status='closed'; cur.closedAtISO=d.toISOString(); cur.closedAtLocal=d.toLocaleString('tr-TR'); cur.closedBy=actor; }
+          await apiUpdateProblem(id, p, cur);
+          renderList(p);
+          try { render(); } catch(e){}
+          return;
+        } catch(e) {}
       });
     });
   };
@@ -6587,9 +6659,17 @@ function openIssuesModal(plateOrEmpty){
       const p = document.getElementById('issuesPlateInput')?.value || '';
       if (!_normPlate(p)) { alert('❗ Önce plaka giriniz.'); return; }
       if (!confirm('Bu plakanın TÜM sorun kayıtları silinsin mi?')) return;
-      clearIssues(p);
-      doRefresh();
-      try { render(); } catch(e){}
+      // try server delete first
+      (async ()=>{
+        try {
+          const res = await fetch('/api/problems/plate/' + encodeURIComponent(_normPlate(p)), { method: 'DELETE' });
+          if (!res.ok) throw new Error('server');
+        } catch(e) {
+          clearIssues(p);
+        }
+        doRefresh();
+        try { render(); } catch(e){}
+      })();
     });
   }
 
@@ -6623,7 +6703,14 @@ function openIssuesModal(plateOrEmpty){
       dateISO: d.toISOString(),
       dateLocal: d.toLocaleString('tr-TR')
     };
-    addIssue(plate, issue);
+    // try server persistence first, fallback to localStorage
+    try {
+      const payload = { plate: _normPlate(plate), data: issue, ts: Date.now() };
+      const res = await fetch('/api/problems', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error('server');
+    } catch(e) {
+      addIssue(plate, issue);
+    }
     document.getElementById('issuesNoteInput').value = '';
     try { document.getElementById('issuesTypeSelect').value = ''; } catch(e){}
     document.getElementById('issuesPhotoInput').value = '';
