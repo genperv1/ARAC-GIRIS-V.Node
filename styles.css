@@ -1,0 +1,103 @@
+/* =========================================================
+   PERF MODU (Animasyon / Geçişleri Kapat)
+   Amaç: FPS drop yaşamamak, arayüzü “fişek” yapmak.
+
+   Not:
+   - Tailwind "transition"/"duration" sınıfları kalsa bile aşağıdaki
+     global override sayesinde hiçbir animasyon/geçiş çalışmaz.
+   - Smooth scroll kapalı.
+   ========================================================= */
+
+/* Smooth scroll kapat */
+html { scroll-behavior: auto !important; }
+
+/* Tüm animasyon ve geçişleri kapat */
+*,
+*::before,
+*::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Tarayıcı motion tercihini de saygıyla ez */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto !important; }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* İsteğe bağlı: bazı tarayıcılarda "smooth" scroll JS ile açılmışsa bile
+   anlık kaydırma için */
+body { scroll-behavior: auto !important; }
+
+/* =========================================================
+   KIOSK MODU (Tam ekran / Büyük yazı)
+   ========================================================= */
+
+.status-chip{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 9999px;
+  background: rgba(255,255,255,0.85);
+  color: rgba(0,0,0,0.75);
+}
+.status-chip b{ color: rgba(0,0,0,0.85); }
+.status-chip.chip-ok{ border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.10); }
+.status-chip.chip-warn{ border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+
+body.kiosk-mode{
+  background-image: none !important;
+  background: #f8fafc !important;
+  font-size: 18px;
+}
+
+/* İç container tam genişlik */
+body.kiosk-mode .max-w-7xl{
+  max-width: 100% !important;
+}
+
+/* Header sabit kalsın */
+body.kiosk-mode .app-header{
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 14px !important;
+}
+
+/* Büyük hızlı giriş */
+body.kiosk-mode #quickPlateInput{
+  font-size: 26px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+body.kiosk-mode #quickStatusRow{
+  font-size: 14px;
+}
+
+/* Kiosk'ta gereksiz menüleri biraz sadeleştir */
+body.kiosk-mode details{
+  display: none !important;
+}
+body.kiosk-mode #raporlarButton,
+body.kiosk-mode #issuesDashboardButton{
+  display: none !important;
+}
+
+/* Kartları büyüt */
+body.kiosk-mode #vehicleList{
+  grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+  gap: 10px !important;
+}
+body.kiosk-mode .vehicle-card{
+  padding: 14px !important;
+}
+body.kiosk-mode .vehicle-card h3{
+  font-size: 26px !important;
+}

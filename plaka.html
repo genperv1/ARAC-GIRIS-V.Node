@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Plaka Ayırma Sistemi</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+body{margin:0;font-family:Arial;background:#0b1020;color:#fff}
+.wrap{max-width:1200px;margin:auto;padding:20px}
+h1{margin:0 0 10px 0}
+.stats{display:flex;gap:20px;margin-bottom:10px}
+.stat{background:#111827;padding:12px 18px;border-radius:12px;font-size:14px}
+.stat b{font-size:28px}
+.area{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+textarea{width:100%;min-height:260px;background:#020617;color:#fff;border:1px solid #334155;border-radius:12px;padding:12px}
+button{background:#2563eb;border:none;color:#fff;padding:10px 16px;border-radius:10px;font-weight:bold;cursor:pointer}
+button.red{background:#dc2626}
+button.gray{background:#334155}
+button.green{background:#16a34a}
+button.small{padding:6px 10px;font-size:12px}
+.topBtns{display:flex;gap:10px;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border-bottom:1px solid #1f2933;padding:8px 10px;text-align:center}
+th{background:#111827}
+.copyBar{display:flex;gap:10px;justify-content:center;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>📋 Plaka Ayırma Sistemi</h1>
+
+<div class="stats">
+  <div class="stat">Toplam BBT<br><b id="totalBBT">0</b></div>
+  <div class="stat">Plaka Sayısı<br><b id="count">0</b></div>
+</div>
+
+<div class="area">
+  <div>
+    <div class="topBtns">
+      <button onclick="parse()">AYIR</button>
+      <button class="red" onclick="clearAll()">TEMİZLE</button>
+    </div>
+    <textarea id="input" placeholder="Plakaları buraya yapıştır..."></textarea>
+  </div>
+
+  <div>
+    <div class="copyBar">
+      <button class="gray small" onclick="copyCol(0)">SIRA NO KOPYALA</button>
+      <button class="gray small" onclick="copyCol(1)">PLAKA KOPYALA</button>
+      <button class="gray small" onclick="copyCol(2)">BBT KOPYALA</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Sıra</th><th>Plaka</th><th>BBT</th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<script>
+let rows=[];
+
+function normalizePlate(s){
+  s=s.toUpperCase().replace(/[^A-Z0-9]/g,' ');
+  const m=s.match(/(\d{2})\s*([A-Z]{1,3})\s*(\d{2,5})/);
+  return m?m[1]+m[2]+m[3]:null;
+}
+
+function parse(){
+  const lines=document.getElementById('input').value.split(/\n+/);
+  rows=[];
+  let total=0;
+  lines.forEach(l=>{
+    if(/iptal/i.test(l))return;
+    const plate=normalizePlate(l);
+    const bbtMatch=l.match(/(\d+)\s*BBT|\/(\d+)/i);
+    const bbt=bbtMatch?parseInt(bbtMatch[1]||bbtMatch[2]):null;
+    if(plate && bbt){
+      rows.push({plate,bbt});
+      total+=bbt;
+    }
+  });
+  render(total);
+}
+
+function render(total){
+  const tb=document.getElementById('tbody');
+  tb.innerHTML='';
+  rows.forEach((r,i)=>{
+    tb.innerHTML+=`<tr><td>${i+1}</td><td>${r.plate}</td><td>${r.bbt}</td></tr>`;
+  });
+  document.getElementById('totalBBT').textContent=total;
+  document.getElementById('count').textContent=rows.length;
+}
+
+function clearAll(){
+  document.getElementById('input').value='';
+  document.getElementById('tbody').innerHTML='';
+  document.getElementById('totalBBT').textContent='0';
+  document.getElementById('count').textContent='0';
+  rows=[];
+}
+
+/* >>> SADECE BURASI DÜZELTİLDİ <<< */
+function copyCol(idx){
+  let txt = '';
+
+  if(idx === 0){
+    // SIRA NO
+    txt = rows.map((_, i) => String(i + 1)).join('\r\n');
+  }
+
+  if(idx === 1){
+    // PLAKA
+    txt = rows.map(r => String(r.plate)).join('\r\n');
+  }
+
+  if(idx === 2){
+    // BBT  ✅ (FIX)
+    txt = rows.map(r => String(r.bbt)).join('\r\n');
+  }
+
+  navigator.clipboard.writeText(txt).then(()=>{
+    alert('Kopyalandı');
+  }).catch(err=>{
+    alert('Kopyalama hatası');
+    console.error(err);
+  });
+}
+
+</script>
+</body>
+</html>
