@@ -101,3 +101,7 @@ body.kiosk-mode .vehicle-card{
 body.kiosk-mode .vehicle-card h3{
   font-size: 26px !important;
 }
+.btn{
+  font-size: 18px !important;
+  padding: 12px 20px !important;
+}
