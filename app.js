@@ -37,14 +37,12 @@ function addOnce(el, eventName, handler, options){
   let _cache = [];
 
   function _readLocal(){
-    try{
-      const raw = localStorage.getItem(KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
-    }catch(e){ return []; }
+    // localStorage fallback for reports removed — return empty list
+    try{ return []; } catch(e){ return []; }
   }
   function _writeLocal(arr){
-    try{ localStorage.setItem(KEY, JSON.stringify(arr)); return true; }catch(e){ return false; }
+    // no-op: do not persist reports to localStorage
+    return true;
   }
 
   // initialize: load local immediately, then try to refresh from server
@@ -67,13 +65,33 @@ function addOnce(el, eventName, handler, options){
 
   function add(type, data){
     try{
+      console.log(data);
+      // collect contextual fields if available (fail-safe)
+      let saat = '';
+      let kantar = '';
+      let malzeme = '';
+      let sevkYeri = '';
+      try {
+        saat = new Date().toLocaleTimeString('tr-TR');
+        kantar = (document.getElementById('imzaKantarAd')?.value || localStorage.getItem('pref_kantar_default_v1_GLOBAL') || '').toString().trim();
+        malzeme = (document.getElementById('malzeme')?.value || document.getElementById('malzemeSelect')?.value || localStorage.getItem('lastMalzeme') || '').toString().trim();
+        sevkYeri = (document.getElementById('sevkYeri')?.value || document.getElementById('xr_sevkYeri')?.value || localStorage.getItem('lastSevkYeri') || '').toString().trim();
+      } catch (e) { /* ignore DOM errors */ }
+
+      const baseData = (data && typeof data === 'object') ? Object.assign({}, data) : { value: data };
+      // attach contextual fields if not already present
+      if (!baseData.saat) baseData.saat = saat || '';
+      if (!baseData.kantar) baseData.kantar = kantar || '';
+      if (!baseData.malzeme) baseData.malzeme = malzeme || '';
+      if (!baseData.sevkYeri) baseData.sevkYeri = sevkYeri || '';
+
       const ev = {
         id: 'EV' + Date.now().toString(36) + Math.random().toString(16).slice(2),
         type: String(type || 'INFO'),
         ts: Date.now(),
         iso: new Date().toISOString(),
-        userId: (localStorage.getItem('currentUserId') || ''),
-        data: (data && typeof data === 'object') ? data : { value: data }
+        userId: '',
+        data: baseData
       };
       _cache.unshift(ev);
       if (_cache.length > MAX) _cache.length = MAX;
@@ -567,19 +585,12 @@ function clearRecentCaches() {
 // =========================
 const SOFOR_HISTORY_KEY = 'soforHistoryByPlaka';
 
-const soforHistoryStorage = {
-  load() {
-    try {
-      const raw = localStorage.getItem(SOFOR_HISTORY_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return (parsed && typeof parsed === 'object') ? parsed : {};
-    } catch (e) {
-      return {};
-    }
-  },
-  save(map) {
-    try { localStorage.setItem(SOFOR_HISTORY_KEY, JSON.stringify(map || {})); } catch (e) {}
-  },
+const soforHistoryStorage = (function(){
+  // In-memory driver history map (plateKey -> array of drivers)
+  const _mem = {};
+  return {
+    load() { try { return _mem; } catch(e) { return {}; } },
+    save(map) { try { Object.keys(_mem).forEach(k => delete _mem[k]); Object.assign(_mem, map || {}); } catch(e) {} },
   _key(plate) {
     return String(plate || '').toUpperCase().replace(/\s+/g,'').trim();
   },
@@ -623,7 +634,38 @@ const soforHistoryStorage = {
     map[k] = next;
     this.save(map);
   }
-};
+  };
+})();
+
+// Load drivers from DB (server) and populate in-memory driver history
+async function loadDriversFromDB(){
+  try{
+    const r = await fetch('/api/vehicles');
+    if (!r.ok) return false;
+    const arr = await r.json();
+    if (!Array.isArray(arr)) return false;
+    for (const v of arr){
+      try{
+        const plate = v.cekiciPlaka || '';
+        const ts = Date.now();
+        if (v.soforAdi || v.soforSoyadi || v.iletisim || v.tcKimlik) {
+          soforHistoryStorage.add(plate, { name: ((v.soforAdi||'') + ' ' + (v.soforSoyadi||'')).trim(), tc: v.tcKimlik || '', phone: v.iletisim || '', updatedAt: ts });
+        }
+        if (v.sofor2Adi || v.sofor2Soyadi) {
+          soforHistoryStorage.add(plate, { name: ((v.sofor2Adi||'') + ' ' + (v.sofor2Soyadi||'')).trim(), tc: '', phone: '', updatedAt: ts });
+        }
+      }catch(e){}
+    }
+    // If state.vehicles is empty, populate it so UI lookups (getVehicleByPlate etc.) work immediately
+    try{
+      if ((!state.vehicles || !state.vehicles.length) && Array.isArray(arr) && arr.length) {
+        state.vehicles = arr;
+        try { cleanDuplicatePlates(); } catch(e) {}
+      }
+    }catch(e){}
+    return true;
+  }catch(e){ return false; }
+}
 
 
 // ✅ Firma kodu normalize: "HP8 / İstanbul" -> "HP8"
@@ -2074,23 +2116,11 @@ let sonuc = {
             // ❌ Malzeme listesini localStorage'dan yükleme kaldırıldı
 eslestirmeStorage.load();
             autoDailySnapshot();
-            render();
+            // populate driver history from DB, then render
+            try { loadDriversFromDB().then(()=>{ try{ render(); }catch(e){} }); } catch(e){ try{ render(); }catch(e){} }
 
-// ✅ Raporlar'dan gelen tekrar yazdır isteği: araç formunu otomatik aç
-try {
-    const pid = (localStorage.getItem('pending_reprint_vehicleId') || '').trim();
-    if (pid) {
-        localStorage.removeItem('pending_reprint_vehicleId');
-        const v = (state.vehicles || []).find(x => String(x.id) === String(pid));
-        if (v) {
-            setTimeout(() => {
-                try { showTakipFormu(v); } catch(e) {}
-            }, 50);
-        } else {
-            try { showToast && showToast('⚠️ Tekrar yazdırılacak araç bulunamadı.'); } catch(e) {}
-        }
-    }
-} catch(e) {}
+// ✅ Raporlar'dan gelen tekrar yazdır isteği: persistence removed (no-op)
+// Previously read pending_reprint_vehicleId from localStorage; now disabled.
 
         }
 
@@ -3978,28 +4008,57 @@ try {
                         if (cur) {
                             const nextCount = (parseInt(cur.printCount || '0', 10) || 0) + 1;
                             const snap = pending.snapshot || cur.lastPrintSnapshot || null;
-                            const updated = { ...cur, printCount: nextCount, lastPrintedAt: nowTs, lastPrintSnapshot: snap };
+                            const updated = { ...cur, printCount: nextCount, lastPrintSnapshot: snap };
                             try { window.storage?.save('vehicle_' + updated.id, updated); } catch(e) {}
                             state.vehicles = (state.vehicles || []).map(v => String(v.id) === String(updated.id) ? updated : v);
 
                             try {
+                              let firma = '';
+                              try {
+                                firma = String(
+                                  (pending && pending.snapshot && (pending.snapshot.firma || pending.snapshot.firmaKodu || pending.snapshot.firmaSelect)) ||
+                                  (cur && cur.lastPrintSnapshot && (cur.lastPrintSnapshot.firma || cur.lastPrintSnapshot.firmaKodu || cur.lastPrintSnapshot.firmaSelect)) ||
+                                  cur.defaultFirma ||
+                                  (document.getElementById && document.getElementById('firmaKodu') && document.getElementById('firmaKodu').value) ||
+                                  localStorage.getItem('lastFirmaKodu') ||
+                                  ''
+                                ).trim();
+                              } catch (e) { firma = ''; }
+
+                              try{
+                                const tarih = (new Date(Number(nowTs))).toLocaleDateString('tr-TR');
                                 window.Report?.addEvent('PRINT', {
-                                    vehicleId: updated.id,
-                                    plaka: updated.cekiciPlaka || pending.plaka || '',
-                                    kayitTarihi: updated.kayitTarihi || '',
-                                    printCount: nextCount,
-                                    lastPrintedAt: nowTs
+                                  vehicleId: updated.id,
+                                  plaka: updated.cekiciPlaka || pending.plaka || '',
+                                  printCount: nextCount,
+                                  tarih: tarih,
+                                  firma: firma
                                 });
+                              } catch(e) { }
                             } catch(e) {}
                         }
                     } else {
                         try {
-                            window.Report?.addEvent('PRINT', {
+                            let firma = '';
+                            try {
+                              firma = String(
+                                (pending && pending.snapshot && (pending.snapshot.firma || pending.snapshot.firmaKodu || pending.snapshot.firmaSelect)) ||
+                                (document.getElementById && document.getElementById('firmaKodu') && document.getElementById('firmaKodu').value) ||
+                                localStorage.getItem('lastFirmaKodu') ||
+                                ''
+                              ).trim();
+                            } catch (e) { firma = ''; }
+
+                            try{
+                              const tarih = (new Date(Number(nowTs))).toLocaleDateString('tr-TR');
+                              window.Report?.addEvent('PRINT', {
                                 vehicleId: vid || 'manual',
                                 plaka: pending.plaka || '',
                                 printCount: 1,
-                                lastPrintedAt: nowTs
-                            });
+                                tarih: tarih,
+                                firma: firma
+                              });
+                            } catch(e) { }
                         } catch(e) {}
                     }
                 } catch(e) {}
@@ -4478,7 +4537,7 @@ document.querySelectorAll('.eslestirme-duzenle-btn').forEach(btn => {
                     ` : ''}
 
                     <!-- Search -->
-                    <div class="bg-white rounded-lg shadow-lg p-4 mb-6">
+                    <div class="bg-white rounded-lg shadow-lg p-4 mb-6 border-l-4 border-indigo-600">
                         <div class="relative">
                             <input type="text" id="searchInput" 
                                 class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" 
@@ -4521,38 +4580,15 @@ document.querySelectorAll('.eslestirme-duzenle-btn').forEach(btn => {
                                     </button>
                                 </div>
                             </div>
-                            <div class="space-y-2 text-sm">
-                                ${vehicle.dorsePlaka ? `
-                                <div class="flex justify-between gap-2">
-                                    <span class="text-gray-600 flex-shrink-0">Dorse:</span>
-                                    <span class="font-medium text-right break-all">${formatPlaka(vehicle.dorsePlaka)}</span>
-                                </div>` : ''}
-                                ${vehicle.soforAdi ? `
-                                <div class="flex justify-between gap-2">
-                                    <span class="text-gray-600 flex-shrink-0">Şoför:</span>
-                                    <span class="font-medium text-right break-words">${vehicle.soforAdi} ${vehicle.soforSoyadi}</span>
-                                </div>` : ''}
-                                ${vehicle.iletisim ? `
-                                <div class="flex justify-between gap-2">
-                                    <span class="text-gray-600 flex-shrink-0">İletişim:</span>
-                                    <span class="font-medium text-right break-all">${vehicle.iletisim}</span>
-                                </div>` : ''}
-                                ${vehicle.tcKimlik ? `
-<div class="flex justify-between gap-2">
-    <span class="text-gray-600 flex-shrink-0">TC Kimlik:</span>
-    <span class="font-medium text-right break-all">${maskTc(vehicle.tcKimlik)}</span>
-</div>` : ''}
-
-                               
-                                
-                                <div class="flex justify-between gap-2">
-                                    <span class="text-gray-500 text-xs flex-shrink-0">Sorun Durumu:</span>
-                                    <span class="text-xs text-right">${issuesStatusHTML(vehicle.cekiciPlaka)}</span>
-                                </div>
-                                <div class="flex justify-between gap-2 pt-2 border-t">
-                                    <span class="text-gray-500 text-xs flex-shrink-0">Kayıt Tarihi:</span>
-                                    <span class="text-gray-500 text-xs text-right">${vehicle.kayitTarihi}</span>
-                                </div>
+                            <div class="grid grid-cols-2 gap-2 text-sm text-gray-700 mb-2">
+                              ${vehicle.dorsePlaka ? `<div><span class="text-gray-500">Dorse</span><div class="font-medium">${formatPlaka(vehicle.dorsePlaka)}</div></div>` : ''}
+                              ${vehicle.soforAdi ? `<div><span class="text-gray-500">Şoför</span><div class="font-medium">${vehicle.soforAdi} ${vehicle.soforSoyadi}</div></div>` : ''}
+                              ${vehicle.iletisim ? `<div><span class="text-gray-500">İletişim</span><div class="font-medium">${vehicle.iletisim}</div></div>` : ''}
+                              ${vehicle.tcKimlik ? `<div><span class="text-gray-500">TC</span><div class="font-medium">${maskTc(vehicle.tcKimlik)}</div></div>` : ''}
+                            </div>
+                            <div class="flex items-center justify-between text-xs text-gray-500 border-t pt-2">
+                              <div>${issuesStatusHTML(vehicle.cekiciPlaka)}</div>
+                              <div>${vehicle.kayitTarihi}</div>
                             </div>
                         </div>
                         `).join('')}
@@ -5677,37 +5713,16 @@ Bu işlem geri alınamaz!`);
                             </button>
                         </div>
                     </div>
-                    <div class="space-y-2 text-sm">
-                        ${vehicle.dorsePlaka ? `
-                        <div class="flex justify-between gap-2">
-                            <span class="text-gray-600 flex-shrink-0">Dorse:</span>
-                            <span class="font-medium text-right break-all">${formatPlaka(vehicle.dorsePlaka)}</span>
-                        </div>` : ''}
-                        ${vehicle.soforAdi ? `
-                        <div class="flex justify-between gap-2">
-                            <span class="text-gray-600 flex-shrink-0">Şoför:</span>
-                            <span class="font-medium text-right break-words">${vehicle.soforAdi} ${vehicle.soforSoyadi}</span>
-                        </div>` : ''}
-                        ${vehicle.iletisim ? `
-                        <div class="flex justify-between gap-2">
-                            <span class="text-gray-600 flex-shrink-0">İletişim:</span>
-                            <span class="font-medium text-right break-all">${vehicle.iletisim}</span>
-                        </div>` : ''}
-                        ${vehicle.tcKimlik ? `
-<div class="flex justify-between gap-2">
-    <span class="text-gray-600 flex-shrink-0">TC Kimlik:</span>
-    <span class="font-medium text-right break-all">${maskTc(vehicle.tcKimlik)}</span>
-</div>` : ''}
-                     
-                        
-                                <div class="flex justify-between gap-2">
-                                    <span class="text-gray-500 text-xs flex-shrink-0">Sorun Durumu:</span>
-                                    <span class="text-xs text-right">${issuesStatusHTML(vehicle.cekiciPlaka)}</span>
-                                </div>
-                                <div class="flex justify-between gap-2 pt-2 border-t">
-                            <span class="text-gray-500 text-xs flex-shrink-0">Kayıt Tarihi:</span>
-                            <span class="text-gray-500 text-xs text-right">${vehicle.kayitTarihi}</span>
-                        </div>
+                      <div class="grid grid-cols-2 gap-2 text-sm text-gray-700 mb-2">
+                        ${vehicle.dorsePlaka ? `<div><span class="text-gray-500">Dorse</span><div class="font-medium">${formatPlaka(vehicle.dorsePlaka)}</div></div>` : ''}
+                        ${vehicle.soforAdi ? `<div><span class="text-gray-500">Şoför</span><div class="font-medium">${vehicle.soforAdi} ${vehicle.soforSoyadi}</div></div>` : ''}
+                        ${vehicle.iletisim ? `<div><span class="text-gray-500">İletişim</span><div class="font-medium">${vehicle.iletisim}</div></div>` : ''}
+                        ${vehicle.tcKimlik ? `<div><span class="text-gray-500">TC</span><div class="font-medium">${maskTc(vehicle.tcKimlik)}</div></div>` : ''}
+                      </div>
+                      <div class="flex items-center justify-between text-xs text-gray-500 border-t pt-2">
+                        <div>${issuesStatusHTML(vehicle.cekiciPlaka)}</div>
+                        <div>${vehicle.kayitTarihi}</div>
+                      </div>
                     </div>
                 </div>
             `).join('');
@@ -6587,6 +6602,8 @@ function openIssuesModal(plateOrEmpty){
       });
       Array.from(card.querySelectorAll('.issueDelBtn')).forEach(btn=>{
         btn.addEventListener('click', async ()=>{
+          const password = prompt('Silme işlemini onaylamak için şifreyi girin:');
+          if (password !== '2026genper') { alert('Hatalı şifre. Silme işlemi iptal edildi.'); return; }
           const id = btn.dataset.id || '';
           const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
           if (id) {
@@ -6701,6 +6718,8 @@ function openIssuesModal(plateOrEmpty){
     });
     Array.from(card.querySelectorAll('.issueDelBtn')).forEach(btn=>{
       btn.addEventListener('click', async ()=>{
+        const password = prompt('Silme işlemini onaylamak için şifreyi girin:');
+        if (password !== '2026genper') { alert('Hatalı şifre. Silme işlemi iptal edildi.'); return; }
         const id = btn.dataset.id || '';
         const p = btn.dataset.plate || document.getElementById('issuesPlateInput')?.value || '';
         if (!id) return;
@@ -6743,7 +6762,10 @@ function openIssuesModal(plateOrEmpty){
     clearBtn.addEventListener('click', ()=>{
       const p = document.getElementById('issuesPlateInput')?.value || '';
       if (!_normPlate(p)) { alert('❗ Önce plaka giriniz.'); return; }
-      if (!confirm('Bu plakanın TÜM sorun kayıtları silinsin mi?')) return;
+      const confirmOk = confirm('Bu plakanın TÜM sorun kayıtları silinsin mi?');
+      if (!confirmOk) return;
+      const password = prompt('Tüm sorunları silmek için şifreyi girin:');
+      if (password !== '2026genper') { alert('Hatalı şifre. İşlem iptal edildi.'); return; }
       // try server delete first
       (async ()=>{
         try {

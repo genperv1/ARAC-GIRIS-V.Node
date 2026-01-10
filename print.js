@@ -174,27 +174,28 @@ eslestirmeStorage.getMalzemeByFirma = function (firma) {
         };
 
         // Veri depolama fonksiyonları
+        // Note: localStorage usage for vehicle records removed — use in-memory store
+        const _memStore = {};
         const storage = {
-            save: (key, data) => {
-                localStorage.setItem(key, JSON.stringify(data));
-            },
-            load: (key) => {
-                const data = localStorage.getItem(key);
-                return data ? JSON.parse(data) : null;
-            },
-            loadAll: () => {
-                const vehicles = [];
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if (key.startsWith('vehicle_')) {
-                        vehicles.push(JSON.parse(localStorage.getItem(key)));
-                    }
-                }
-                return vehicles;
-            },
-            delete: (key) => {
-                localStorage.removeItem(key);
+          save: (key, data) => {
+            try { _memStore[String(key)] = JSON.parse(JSON.stringify(data)); } catch (e) { _memStore[String(key)] = data; }
+          },
+          load: (key) => {
+            const v = _memStore[String(key)];
+            try { return v === undefined ? null : JSON.parse(JSON.stringify(v)); } catch (e) { return v === undefined ? null : v; }
+          },
+          loadAll: () => {
+            const vehicles = [];
+            for (const key in _memStore) {
+              if (Object.prototype.hasOwnProperty.call(_memStore, key) && key.startsWith('vehicle_')) {
+                try { vehicles.push(JSON.parse(JSON.stringify(_memStore[key]))); } catch (e) { vehicles.push(_memStore[key]); }
+              }
             }
+            return vehicles;
+          },
+          delete: (key) => {
+            try { delete _memStore[String(key)]; } catch (e) {}
+          }
         };
 
         // TÜM VERİLERİ DIŞA AKTAR - YENİ
@@ -552,14 +553,14 @@ eslestirmeStorage.getMalzemeByFirma = function (firma) {
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; margin-bottom: 6mm;">
           <div>
             <strong style="font-size: 11pt; display: block; margin-bottom: 1mm;">ÇEKİCİ PLAKA</strong>
-            <span style="font-weight: bold; font-size: 14pt; color: #2c3e50; display: block; height: 8mm; line-height: 8mm;"
+            <span style="font-weight: bold; font-size: 14pt; color:  #2c3e50; display: block; height: 8mm; line-height: 8mm;"
                   class="highlight-field" id="cekiciPlakaBilgi">
               ${vehicle.cekiciPlaka || '-'}
             </span>
           </div>
           <div>
             <strong style="font-size: 11pt; display: block; margin-bottom: 1mm;">DORSE PLAKA</strong>
-            <span style="font-weight: bold; font-size: 14pt; color: #2c3e50; display: block; height: 8mm; line-height: 8mm;"
+            <span style="font-weight: bold; font-size: 14pt;  color: #2c3e50; display: block; height: 8mm; line-height: 8mm; width:150px;"
                   class="highlight-field" id="dorsePlakaBilgi">
               ${vehicle.dorsePlaka || '-'}
             </span>

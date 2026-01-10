@@ -1,152 +1,114 @@
 <!DOCTYPE html>
 <html lang="tr">
-	<head>
-    <link rel="icon" type="image/png" href="https://i.hizliresim.com/5w96wuo.png">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Araç Plaka Takip Sistemi</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
-    <!-- Giriş Ekranı -->
-    <div id="loginScreen" class="min-h-screen flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-            <div class="text-center mb-8">
+    <head>
+        <link rel="icon" type="image/png" href="https://i.hizliresim.com/5w96wuo.png">
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <script>
+            (function(){
+                try{ if (localStorage.getItem('isLoggedIn') === 'true') document.documentElement.classList.add('logged-in'); }catch(e){}
+            })();
+        </script>
+        <style>
+            .logged-in #loginScreen{ display: none !important; }
+            .logged-in #mainApp{ display: block !important; }
+            .logged-in #loginLoading{ display: none !important; }
+        </style>
+        <title>Araç Plaka Takip Sistemi</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="styles.css">
+    </head>
+    <body class="bg-gray-50 min-h-screen text-gray-700">
 
-    <!-- ESKİ TIR İKONU SİLİNDİ ve LOGO EKLENDİ -->
-    <img src="https://i.hizliresim.com/5w96wuo.png" 
-         alt="logo"
-         class="w-50 h-40 mx-auto mb-4 object-contain">
-    <h1 class="text-3xl font-bold text-gray-800 mb-2">Araç Plaka Takip</h1>
-    <p class="text-gray-600">Sisteme giriş yapın</p>
-</div>
 
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        🆔 Kullanıcı ID
-                    </label>
-                    <input 
-                        type="text" 
-                        id="loginId" 
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
-                        placeholder="ID giriniz"
-                        autocomplete="off"
-                    >
+        <!-- Giriş Ekranı -->
+        <div id="loginScreen" class="min-h-screen flex items-center justify-center p-6">
+            <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                <div class="text-center mb-6">
+                    <img src="https://i.hizliresim.com/5w96wuo.png" alt="logo" class="mx-auto mb-4 w-36 h-28 object-contain">
+                    <h1 class="text-2xl font-bold text-gray-800 mb-1">Araç Plaka Takip</h1>
+                    <p class="text-sm text-gray-500">Sisteme giriş yapın</p>
                 </div>
 
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        🔒 Şifre
-                    </label>
-                    <input 
-                        type="password" 
-                        id="loginPassword" 
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
-                        placeholder="Şifre giriniz"
-                        autocomplete="off"
-                    >
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Kullanıcı ID</label>
+                        <input type="text" id="loginId" class="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" placeholder="ID giriniz" autocomplete="off">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Şifre</label>
+                        <input type="password" id="loginPassword" class="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" placeholder="Şifre giriniz" autocomplete="off">
+                    </div>
+
+                    <button id="loginButton" class="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-semibold">Giriş Yap</button>
                 </div>
 
-                <button 
-                    id="loginButton"
-                    class="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold text-lg mt-6"
-                >
-                    🚀 Giriş Yap
-                </button>
-            </div>
-			
-<div id="loginError" class="mt-4 text-center text-sm text-red-600 hidden">
-    Hatalı ID veya Şifre!
-</div>
-            <div class="mt-6 text-center text-xs text-gray-500">
-                <p>🔐 Güvenli Giriş Sistemi</p>
-            </div>
-		
-        </div>
-    </div>
+                <div id="loginError" class="mt-4 text-center text-sm text-red-600 hidden">Hatalı ID veya Şifre!</div>
 
-    <!-- Ana Uygulama -->
-    <div id="mainApp" style="display: none;" class="p-4"></div>
-
-    <!-- Takip Formu Modal -->
-    <div id="takipFormuModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center p-4 pt-8 z-50 hidden">
-        <div class="bg-white rounded-lg max-w-5xl w-full max-h-[92vh] overflow-auto shadow-xl">
-            
-<div class="p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10">
-    <h2 class="text-xl font-bold">Sevkiyat Yüklemesi Takip Formu</h2>
-    <div class="flex gap-2">
-        <button id="yazdirButton" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">🖨️ Yazdır</button>
-        <button id="onizlemeButton" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">👁️ Önizleme</button>
-        <button id="kapatButton" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">❌ Kapat</button>
-    </div>
-</div>
-
-        <div id="takipFormu" class="p-6">
-                <!-- Form içeriği buraya JavaScript ile doldurulacak -->
+                <div class="mt-6 text-center text-xs text-gray-500">🔐 Güvenli Giriş Sistemi</div>
             </div>
         </div>
-    </div>
-        </div>
-    </div>
 
+        <!-- Ana Uygulama -->
+        <div id="mainApp" style="display: none;" class="p-4"></div>
 
-    <!-- Firma Yönetim Modal -->
-    <div id="firmaYonetimModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 hidden no-print">
-        <div class="bg-white rounded-lg max-w-2xl w-full max-h-[92vh] overflow-auto">
-            <div class="p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10">
-                <h2 class="text-xl font-bold">Firma Yönetimi</h2>
-                <button id="firmaModalKapatButton" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">
-                    ❌ Kapat
-                </button>
-            </div>
-            <div class="p-6">
-                <div class="mb-4">
-                    <h3 class="text-lg font-bold mb-2">Yeni Firma Ekle</h3>
+        <!-- Takip Formu Modal -->
+        <div id="takipFormuModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center p-4 pt-8 z-50 hidden">
+            <div class="bg-white rounded-lg max-w-5xl w-full max-h-[92vh] overflow-auto shadow-xl">
+                <div class="p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+                    <h2 class="text-xl font-bold">Sevkiyat Yüklemesi Takip Formu</h2>
                     <div class="flex gap-2">
-                        <input type="text" id="yeniFirmaInput" class="flex-grow px-3 py-2 border border-gray-300 rounded-lg" placeholder="Firma adı giriniz">
-                        <button id="firmaEkleButton" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                            Ekle
-                        </button>
+                        <button id="yazdirButton" class="bg-indigo-600 text-white px-4 py-2 rounded">Yazdır</button>
+                        <button id="onizlemeButton" class="bg-slate-600 text-white px-4 py-2 rounded">Önizleme</button>
+                        <button id="kapatButton" class="bg-gray-600 text-white px-4 py-2 rounded">Kapat</button>
                     </div>
                 </div>
-                
+                <div id="takipFormu" class="p-6"></div>
+            </div>
+        </div>
+
+        <!-- Firma Yönetim Modal -->
+        <div id="firmaYonetimModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 hidden no-print">
+            <div class="bg-white rounded-lg max-w-2xl w-full max-h-[92vh] overflow-auto">
+                <div class="p-4 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+                    <h2 class="text-xl font-bold">Firma Yönetimi</h2>
+                    <button id="firmaModalKapatButton" class="bg-gray-600 text-white px-4 py-2 rounded">Kapat</button>
+                </div>
+                <div class="p-6">
+                    <div class="mb-4">
+                        <h3 class="text-lg font-bold mb-2">Yeni Firma Ekle</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="yeniFirmaInput" class="flex-grow px-3 py-2 border rounded" placeholder="Firma adı giriniz">
+                            <button id="firmaEkleButton" class="bg-indigo-600 text-white px-4 py-2 rounded">Ekle</button>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold mb-2">Kayıtlı Firmalar</h3>
+                        <div id="firmaListesi" class="border rounded-lg p-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LOGIN LOADING OVERLAY -->
+        <div id="loginLoading" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+            <div class="bg-white rounded-2xl shadow-2xl p-6 flex items-center gap-4">
+                <div class="spinner"></div>
                 <div>
-                    <h3 class="text-lg font-bold mb-2">Kayıtlı Firmalar</h3>
-                    <div id="firmaListesi" class="border rounded-lg">
-                        <!-- Firma listesi buraya JavaScript ile doldurulacak -->
-                    </div>
+                    <div class="font-bold text-gray-800">Giriş yapılıyor…</div>
+                    <div class="text-sm text-gray-500">Lütfen bekleyin</div>
                 </div>
             </div>
         </div>
-    </div>
 
-    
-    <!-- Eşleştirme kaldırıldı (Excel okuma ile devam) -->
-
-</div>
-                </div>
-<!-- LOGIN LOADING OVERLAY (Giriş gecikmesi) -->
-    <div id="loginLoading" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-        <div class="bg-white rounded-2xl shadow-2xl p-6 flex items-center gap-4">
-            <div class="spinner"></div>
-            <div>
-                <div class="font-bold text-gray-800">Giriş yapılıyor…</div>
-                <div class="text-sm text-gray-500">Lütfen bekleyin</div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-    <!-- ✅ Yeni modüller (hız + hata raporu + IndexedDB) -->
-    <script src="idb.js"></script>
-    <script src="dailyStore.js"></script>
-    <script src="errorReporter.js"></script>
-
-    <script src="storage.js"></script>
-    <script src="print.js"></script>
-    <script src="app.js"></script>
-    <script src="piyasa.js"></script>
-</body>
+        <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+        <script src="idb.js"></script>
+        <script src="dailyStore.js"></script>
+        <script src="errorReporter.js"></script>
+        <script src="storage.js"></script>
+        <script src="print.js"></script>
+        <script src="app.js"></script>
+        <script src="piyasa.js"></script>
+    </body>
 </html>

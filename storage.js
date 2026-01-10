@@ -15,22 +15,12 @@
           const vehicles = await resp.json();
           storage._cache = Array.isArray(vehicles) ? vehicles : [];
           storage._loaded = true;
-          // localStorage'a da yedek olarak kaydet
-          try { localStorage.setItem(storage._KEY, JSON.stringify(storage._cache)); } catch (e) {}
+          // localStorage fallback removed (no-op)
           return storage._cache;
         }
       } catch (e) {}
 
-      // Fallback: localStorage
-      try {
-        const raw = localStorage.getItem(storage._KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          storage._cache = Array.isArray(parsed) ? parsed : [];
-          storage._loaded = true;
-          return storage._cache;
-        }
-      } catch (e) {}
+      // No local fallback available; return empty cache
 
       storage._cache = [];
       storage._loaded = true;
@@ -52,22 +42,13 @@
         }
       } catch (e) {}
 
-      // localStorage fallback
-      try { localStorage.setItem(storage._KEY, JSON.stringify(arr)); } catch (e) {}
+      // localStorage fallback removed (no-op)
     },
 
     // SENKRON: cache'i döndür (hızlı fallback)
     loadAll: () => {
       if (Array.isArray(storage._cache)) return storage._cache;
-      // Try localStorage
-      try {
-        const raw = localStorage.getItem(storage._KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          storage._cache = Array.isArray(parsed) ? parsed : [];
-          return storage._cache;
-        }
-      } catch (e) {}
+      // No local fallback available; ensure empty cache
       storage._cache = [];
       return storage._cache;
     },
@@ -85,7 +66,7 @@
       else vehicles.push(data);
 
       storage._cache = vehicles;
-      try { localStorage.setItem(storage._KEY, JSON.stringify(vehicles)); } catch (e) {}
+      // localStorage write removed (no-op)
 
       // Arkada server'a yaz (fire-and-forget)
       try {
@@ -111,7 +92,7 @@
 
       const filtered = vehicles.filter(v => String(v.id) !== id);
       storage._cache = filtered;
-      try { localStorage.setItem(storage._KEY, JSON.stringify(filtered)); } catch (e) {}
+      // localStorage write removed (no-op)
 
       // Arkada server'dan sil (fire-and-forget)
       try {
